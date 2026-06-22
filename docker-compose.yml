@@ -1,0 +1,191 @@
+version: '3.7'
+
+services:
+  # Airflow service
+  postgres:
+    image: postgres:15
+    container_name: postgres_container
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres && psql -U postgres -d postgres -c 'SELECT 1'" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis_container
+    ports:
+      - 6379:6379
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  airflow-init:
+    image: apache/airflow:2.8.1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "your-secret-key-here"
+      PYTHONPATH: "/opt/airflow"
+    volumes:
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "
+        pip install -r /requirements.txt &&
+        sleep 10 &&
+        airflow db init &&
+        airflow users create --username admin --firstname airflow --lastname admin --role Admin --email admin@example.com --password admin
+      "
+
+  airflow-webserver:
+    image: apache/airflow:2.8.1
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres_dwh:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: "true"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "your-secret-key-here"
+      PYTHONPATH: "/opt/airflow"
+      DB_CONNECTION_STRING: "postgresql://postgres:postgres@postgres_dwh:5432/postgres"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - ./lib:/opt/airflow/lib
+      - ./requirements.txt:/requirements.txt
+    ports:
+      - "8080:8080"
+    command: >
+      bash -c "
+        pip install -r /requirements.txt &&
+        airflow webserver
+      "
+    healthcheck:
+      test: [ "CMD-SHELL", "curl --fail http://localhost:8080/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    image: apache/airflow:2.8.1
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres_dwh:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: "true"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "your-secret-key-here"
+      PYTHONPATH: "/opt/airflow"
+      DB_CONNECTION_STRING: "postgresql://postgres:postgres@postgres_dwh:5432/postgres"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - ./lib:/opt/airflow/lib
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "
+        pip install -r /requirements.txt &&
+        airflow scheduler
+      "
+
+  airflow-worker:
+    image: apache/airflow:2.8.1
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+      postgres_dwh:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://postgres:postgres@postgres:5432/postgres
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SHOW_TRIGGER_FORM_IF_NO_PARAMS: "true"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "your-secret-key-here"
+      PYTHONPATH: "/opt/airflow"
+      DB_CONNECTION_STRING: "postgresql://postgres:postgres@postgres_dwh:5432/postgres"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./data:/opt/airflow/data
+      - ./lib:/opt/airflow/lib
+      - ./requirements.txt:/requirements.txt
+    command: >
+      bash -c "
+        pip install -r /requirements.txt &&
+        airflow celery worker
+      "
+
+  # DWH
+  postgres_dwh:
+    image: postgres:15
+    container_name: postgres_dwh
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_dwh_data:/var/lib/postgresql/data
+      - ./data/db_init:/docker-entrypoint-initdb.d
+    ports:
+      - 5433:5432
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} && psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -c 'SELECT 1'" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # S3
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    ports:
+      - 9003:9000
+      - 9001:9001
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
