@@ -189,3 +189,11 @@ services:
     volumes:
       - minio_data:/data
     restart: unless-stopped
+
+networks:
+  default:
+
+volumes:
+  postgres_data:
+  postgres_dwh_data:
+  minio_data:
