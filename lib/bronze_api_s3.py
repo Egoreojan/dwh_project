@@ -80,7 +80,7 @@ def load_raw_data(**context):
             raise AirflowFailException("Empty data!")
 
         data = transform_data(data)
-        save_data_to_s3(data, context['ts'])
+        save_data_to_s3(data, context['ds'])
 
     except Exception as e:
         logging.exception(f"Error: {e}")

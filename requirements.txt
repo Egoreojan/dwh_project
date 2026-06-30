@@ -3,3 +3,7 @@ apache-airflow
 requests
 python-dotenv
 pandas
+s3fs
+pyarrow
+fastparquet
+minio

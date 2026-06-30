@@ -1,16 +1,18 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from lib.bronze_api_s3 import load_raw_data
 
+today = date.today()
+
 default_args = {
     'owner': 'airflow',
-    'depends_on_past': True,
     'retries_delay': timedelta(seconds=10),
-    'start_date': datetime(2026, 6, 20),
+    'start_date': datetime(today.year, today.month, today.day),
     'catchup': False,
-    'execution_timeout': timedelta(minutes=2),
-    'schedule': '@daily'
+    'execution_timeout': timedelta(seconds=20),
+    'schedule': '@daily',
+    'max_active_runs': 1
 }
 
 with DAG(
